@@ -4,13 +4,14 @@ import { Application } from "pixi.js";
 import * as TWEEN from "@tweenjs/tween.js";
 import Port from "./classes/Port";
 import Ship from "./classes/Ship";
-import { colors } from "./utils/constatns";
+import WaitingArea from "./classes/WaitingArea";
+import { colors } from "./utils/constants";
 
 const gameWidth = 1280;
 const gameHeight = 720;
 
 console.log(
-    `%cPixiJS V7\nTypescript Boilerplate%c ${VERSION} %chttp://www.pixijs.com %c❤️`,
+    `%cTest for onseo by Nikita Y. %c❤️`,
     "background: #ff66a1; color: #FFFFFF; padding: 2px 4px; border-radius: 2px; font-weight: bold;",
     "color: #D81B60; font-weight: bold;",
     "color: #C2185B; font-weight: bold; text-decoration: underline;",
@@ -37,9 +38,11 @@ function resizeCanvas(): void {
 
 export const port = new Port();
 
-app.ticker.add(() => {
-    TWEEN.update();
-});
+export const waitingArea = new WaitingArea();
+
+const newShip = new Ship();
+newShip.createShip();
+newShip.moveToWaitingArea(newShip);
 
 window.onload = async (): Promise<void> => {
     document.body.appendChild(app.view);
@@ -48,15 +51,10 @@ window.onload = async (): Promise<void> => {
 
     const ships: Ship[] = [];
 
-    const newShip = new Ship();
-
-    app.stage.addChild(newShip.getShip());
-    newShip.moveToWaitingArea();
-
     setInterval(() => {
         const newShip = new Ship();
-        app.stage.addChild(newShip.getShip());
-        newShip.moveToWaitingArea();
+        newShip.createShip();
+        newShip.moveToWaitingArea(newShip);
 
         ships.push(newShip);
 
@@ -65,3 +63,7 @@ window.onload = async (): Promise<void> => {
         }
     }, 8000);
 };
+
+app.ticker.add(() => {
+    TWEEN.update();
+});

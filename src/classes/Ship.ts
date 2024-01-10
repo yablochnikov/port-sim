@@ -1,17 +1,27 @@
 import { Graphics } from "pixi.js";
 import * as TWEEN from "@tweenjs/tween.js";
-import { app, port } from "..";
-import { colors } from "../utils/constatns";
+import { app, port, waitingArea } from "..";
+import { colors } from "../utils/constants";
+import Pier from "./Pier";
 
 class Ship {
     private ship: Graphics;
     private hasCargo: boolean = Math.random() >= 0.5;
     private isLoaded: boolean = false;
+    private loadedQueue: Ship[] = [];
+    private unloadedQueue: Ship[] = [];
+    private checkPortInterval: NodeJS.Timeout | null = null;
 
     constructor() {
         this.ship = new Graphics();
-        this.createShip();
-        this.moveToWaitingArea();
+    }
+
+    getHasCargo(): boolean {
+        return this.hasCargo;
+    }
+
+    getIsLoaded(): boolean {
+        return this.isLoaded;
     }
 
     createShip() {
@@ -33,46 +43,135 @@ class Ship {
         return this.ship;
     }
 
-    moveToWaitingArea() {
-        const waitingArea = port.getWaitingArea(this.hasCargo).getBounds();
-        const centerX = waitingArea.x;
-        const centerY = waitingArea.y;
+    private checkPortAvailability() {
+        this.checkPortInterval = setInterval(() => {
+            const loadedPier = port.getLoadedPier();
+            const freePier = port.getFreePier();
 
-        if (this.hasCargo) {
-            new TWEEN.Tween(this.ship.position)
-                .to({ x: centerX, y: centerY }, 3000)
-                .easing(TWEEN.Easing.Quadratic.Out)
-                .start()
-                .onComplete(() => {});
-        } else {
-            new TWEEN.Tween(this.ship.position)
-                .to({ x: centerX, y: centerY }, 3000)
-                .easing(TWEEN.Easing.Quadratic.Out)
-                .start()
-                .onComplete(() => {});
-        }
+            if (!this.isLoaded && this.shouldMoveQueue(this) && freePier && !freePier.isLoaded && !freePier.isLoading) {
+                this.moveToEntrance(this);
+                this.stopCheckPortInterval();
+            } else if (
+                this.isLoaded &&
+                this.shouldMoveQueue(this) &&
+                loadedPier &&
+                loadedPier.isLoaded &&
+                !loadedPier.isLoading
+            ) {
+                this.moveToEntrance(this);
+                this.stopCheckPortInterval();
+            }
+        }, 2500);
     }
 
-    moveToEntrance() {
+    private stopCheckPortInterval() {
+        if (this.checkPortInterval !== null) {
+            clearInterval(this.checkPortInterval);
+            this.checkPortInterval = null;
+        }
+    }
+    moveToWaitingArea(ship: Ship) {
+        const currentWaitingArea = waitingArea.getWaitingArea(ship.hasCargo).getBounds();
+        const centerX = currentWaitingArea.x;
+        const centerY = currentWaitingArea.y;
+
+        if (ship.hasCargo) {
+            this.loadedQueue.push(ship);
+            new TWEEN.Tween(ship.getShip().position)
+                .to({ x: centerX, y: centerY }, 3000)
+                .easing(TWEEN.Easing.Quadratic.Out)
+                .start()
+                .onComplete(() => {
+                    waitingArea.addToLoadedQueue(ship);
+                });
+        } else {
+            this.unloadedQueue.push(ship);
+            new TWEEN.Tween(ship.getShip().position)
+                .to({ x: centerX, y: centerY }, 3000)
+                .easing(TWEEN.Easing.Quadratic.Out)
+                .start()
+                .onComplete(() => {
+                    waitingArea.addToEmptyQueue(ship);
+                });
+        }
+        this.checkPortAvailability();
+    }
+
+    private modifyShipAppearance(ship: Ship, color: number) {
+        this.ship.clear();
+        this.ship.lineStyle(2, color);
+        this.ship.drawRect(ship.getShip().position.x, ship.getShip().position.y, 150, 30);
+    }
+
+    moveToEntrance(ship: Ship) {
         const entranceLine = port.getEntranceLocation();
         const centerX = entranceLine.x;
         const centerY = entranceLine.y;
 
-        new TWEEN.Tween(this.ship.position)
-            .to({ x: centerX, y: centerY }, 3000)
-            .easing(TWEEN.Easing.Quadratic.Out)
-            .start()
-            .onComplete(() => {
-                // const freePier = port.getFreePier(this.ship);
-            });
+        const loadedPier = port.getLoadedPier();
+        const freePier = port.getFreePier();
+
+        const moveToPier = (pier: Pier) => {
+            const pierBounds = pier.getPier().getBounds();
+
+            pier.setLoading(true);
+
+            new TWEEN.Tween(ship.getShip().position)
+                .to(pierBounds, 3000)
+                .easing(TWEEN.Easing.Quadratic.Out)
+                .start()
+                .onComplete(() => {
+                    setTimeout(() => {
+                        this.finalizeShipMovement(ship);
+
+                        if (ship.hasCargo) {
+                            pier.loadCargo();
+                            this.modifyShipAppearance(ship, colors.RED);
+                        } else {
+                            pier.unloadCargo();
+                            this.modifyShipAppearance(ship, colors.GREEN);
+                        }
+                        pier.setLoading(false);
+                    }, 5000);
+                });
+        };
+
+        const startMove = (pier: Pier) => {
+            new TWEEN.Tween(ship.getShip().position)
+                .to({ x: centerX, y: centerY })
+                .easing(TWEEN.Easing.Quadratic.Out)
+                .start()
+                .onComplete(() => moveToPier(pier));
+        };
+
+        if (ship.hasCargo && freePier && !freePier.isLoaded && !freePier.isLoading) {
+            startMove(freePier);
+        } else if (!ship.hasCargo && loadedPier && loadedPier.isLoaded && !loadedPier.isLoading) {
+            moveToPier(loadedPier);
+        }
     }
 
-    unloadCargo() {
-        this.hasCargo = false;
-        this.isLoaded = false;
-        this.ship.clear();
-        this.ship.lineStyle(2, colors.RED);
-        this.ship.drawRect(0, 0, 150, 30);
+    shouldMoveQueue(ship: Ship): boolean {
+        const loadedPier = port.getLoadedPier();
+        const freePier = port.getFreePier();
+
+        if (ship.hasCargo && freePier && !freePier.isLoaded && !freePier.isLoading) {
+            return true;
+        } else if (!ship.hasCargo && loadedPier && loadedPier.isLoaded && !loadedPier.isLoading) {
+            return true;
+        }
+
+        return false;
+    }
+
+    private finalizeShipMovement(ship: Ship) {
+        new TWEEN.Tween(ship.getShip().position)
+            .to({
+                x: app.screen.width + 1000,
+                y: app.screen.height / 2,
+            })
+            .easing(TWEEN.Easing.Quadratic.Out)
+            .start();
     }
 }
 
